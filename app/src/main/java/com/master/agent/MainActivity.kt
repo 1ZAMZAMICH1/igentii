@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity() {
             text = "Мастер: Автономный ИИ Ассистент"
             textSize = 24f
             setPadding(0, 20, 0, 50)
-            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+            textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
         }
         container.addView(titleView)
 
