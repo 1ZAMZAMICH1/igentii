@@ -95,7 +95,7 @@ class MasterAccessibilityService : AccessibilityService() {
             moveTo(x, y)
         }
         val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 50))
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0L, 50L))
         
         dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
@@ -116,7 +116,7 @@ class MasterAccessibilityService : AccessibilityService() {
             lineTo(endX, endY)
         }
         val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0L, duration))
         
         dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {

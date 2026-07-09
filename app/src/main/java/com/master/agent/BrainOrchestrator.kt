@@ -69,7 +69,7 @@ class BrainOrchestrator(
                             launchApp(packageName)
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 runAgentLoop(stepCount + 1)
-                            }, 1500)
+                            }, 1500L)
                         } else {
                             handleFailure("Не указано имя пакета для запуска.")
                         }
@@ -82,7 +82,7 @@ class BrainOrchestrator(
                                 if (success) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         runAgentLoop(stepCount + 1)
-                                    }, 1000)
+                                    }, 1000L)
                                 } else {
                                     handleFailure("Не удалось симулировать клик в координатах $x, $y")
                                 }
@@ -101,7 +101,7 @@ class BrainOrchestrator(
                             if (success) {
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     runAgentLoop(stepCount + 1)
-                                }, 1200)
+                                }, 1200L)
                             } else {
                                 handleFailure("Свайп не удался.")
                             }
@@ -116,7 +116,7 @@ class BrainOrchestrator(
                             focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 runAgentLoop(stepCount + 1)
-                            }, 800)
+                            }, 800L)
                         } else {
                             handleFailure("Фокус ввода текста не найден на экране.")
                         }
