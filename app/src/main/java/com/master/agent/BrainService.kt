@@ -22,7 +22,7 @@ class BrainService(private val apiKey: String) {
 
     companion object {
         private const val TAG = "MasterBrain"
-        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     }
 
     interface BrainCallback {
