@@ -1,6 +1,8 @@
 package com.master.agent
 
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -22,7 +24,9 @@ class BrainService(private val apiKey: String) {
 
     companion object {
         private const val TAG = "MasterBrain"
-        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateContent"
+        private const val MAX_RETRIES = 3
+        private const val INITIAL_RETRY_DELAY_MS = 1000L
     }
 
     interface BrainCallback {
@@ -88,6 +92,10 @@ class BrainService(private val apiKey: String) {
             .post(requestBodyJson.toString().toRequestBody(mediaType))
             .build()
 
+        sendRequest(request, callback, MAX_RETRIES, INITIAL_RETRY_DELAY_MS)
+    }
+
+    private fun sendRequest(request: Request, callback: BrainCallback, retriesLeft: Int, delayMs: Long) {
         client.newCall(request).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: IOException) {
                 Log.e(TAG, "Gemini API request failed", e)
@@ -97,8 +105,16 @@ class BrainService(private val apiKey: String) {
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                 val responseStr = response.body?.string()
                 if (!response.isSuccessful || responseStr == null) {
-                    Log.e(TAG, "Gemini API returned error code ${response.code}: $responseStr")
-                    callback.onFailure("API Error code ${response.code}")
+                    val code = response.code
+                    Log.e(TAG, "Gemini API returned error code $code: $responseStr")
+                    if ((code == 429 || code >= 500) && retriesLeft > 0) {
+                        Log.w(TAG, "Retrying Gemini request in ${delayMs}ms. Retries left: ${retriesLeft - 1}")
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            sendRequest(request, callback, retriesLeft - 1, delayMs * 2)
+                        }, delayMs)
+                        return
+                    }
+                    callback.onFailure("API Error code $code")
                     return
                 }
 
@@ -109,7 +125,6 @@ class BrainService(private val apiKey: String) {
                     val content = firstCandidate.getJSONObject("content")
                     val parts = content.getJSONArray("parts")
                     val responseText = parts.getJSONObject(0).getString("text").trim()
-                    
                     val actionJson = JSONObject(responseText)
                     callback.onSuccess(actionJson)
                 } catch (e: Exception) {
