@@ -59,97 +59,101 @@ class BrainOrchestrator(
 
         brain.decideNextStep(currentInstruction, screenHierarchy, history.toString(), object : BrainService.BrainCallback {
             override fun onSuccess(action: JSONObject) {
-                val reasoning = action.optString("reasoning", "")
-                val actionType = action.optString("action", "done")
-                
-                Log.d(TAG, "Gemini action: $actionType. Reasoning: $reasoning")
-                history.append("- Step $stepCount: Action=$actionType. Reason: $reasoning\n")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    val reasoning = action.optString("reasoning", "")
+                    val actionType = action.optString("action", "done")
+                    
+                    Log.d(TAG, "Gemini action: $actionType. Reasoning: $reasoning")
+                    history.append("- Step $stepCount: Action=$actionType. Reason: $reasoning\n")
 
-                when (actionType) {
-                    "launch_app" -> {
-                        val packageName = action.optString("packageName")
-                        if (packageName.isNotEmpty()) {
-                            launchApp(packageName)
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                runAgentLoop(stepCount + 1)
-                            }, 1200L)
-                        } else {
-                            handleFailure("Не указано имя пакета для запуска.")
+                    when (actionType) {
+                        "launch_app" -> {
+                            val packageName = action.optString("packageName")
+                            if (packageName.isNotEmpty()) {
+                                launchApp(packageName)
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    runAgentLoop(stepCount + 1)
+                                }, 1200L)
+                            } else {
+                                handleFailure("Не указано имя пакета для запуска.")
+                            }
                         }
-                    }
-                    "click" -> {
-                        val x = action.optDouble("x", -1.0).toFloat()
-                        val y = action.optDouble("y", -1.0).toFloat()
-                        if (x >= 0 && y >= 0) {
-                            service.clickAt(x, y) { success ->
+                        "click" -> {
+                            val x = action.optDouble("x", -1.0).toFloat()
+                            val y = action.optDouble("y", -1.0).toFloat()
+                            if (x >= 0 && y >= 0) {
+                                service.clickAt(x, y) { success ->
+                                    if (success) {
+                                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                            runAgentLoop(stepCount + 1)
+                                        }, 700L)
+                                    } else {
+                                        handleFailure("Не удалось нажать на element.")
+                                    }
+                                }
+                            } else {
+                                handleFailure("Координаты клика отсутствуют.")
+                            }
+                        }
+                        "swipe" -> {
+                            val startX = action.optDouble("startX", 0.0).toFloat()
+                            val startY = action.optDouble("startY", 0.0).toFloat()
+                            val endX = action.optDouble("endX", 0.0).toFloat()
+                            val endY = action.optDouble("endY", 0.0).toFloat()
+                            val duration = action.optLong("duration", 300)
+                            service.swipe(startX, startY, endX, endY, duration) { success ->
                                 if (success) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         runAgentLoop(stepCount + 1)
-                                    }, 700L)
+                                    }, 800L)
                                 } else {
-                                    handleFailure("Не удалось нажать на элемент.")
+                                    handleFailure("Свайп не удался.")
                                 }
                             }
-                        } else {
-                            handleFailure("Координаты клика отсутствуют.")
                         }
-                    }
-                    "swipe" -> {
-                        val startX = action.optDouble("startX", 0.0).toFloat()
-                        val startY = action.optDouble("startY", 0.0).toFloat()
-                        val endX = action.optDouble("endX", 0.0).toFloat()
-                        val endY = action.optDouble("endY", 0.0).toFloat()
-                        val duration = action.optLong("duration", 300)
-                        service.swipe(startX, startY, endX, endY, duration) { success ->
-                            if (success) {
+                        "type" -> {
+                            val text = action.optString("text")
+                            val focusedNode = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                            if (focusedNode != null) {
+                                val arguments = android.os.Bundle()
+                                arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                                focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     runAgentLoop(stepCount + 1)
-                                }, 800L)
+                                }, 600L)
                             } else {
-                                handleFailure("Свайп не удался.")
+                                handleFailure("Поле ввода не найдено на экране.")
                             }
                         }
-                    }
-                    "type" -> {
-                        val text = action.optString("text")
-                        val focusedNode = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                        if (focusedNode != null) {
-                            val arguments = android.os.Bundle()
-                            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-                            focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                        "speak" -> {
+                            val text = action.optString("text")
+                            speak(text)
+                            isRunning = false
+                            onDoneCallback?.invoke()
+                        }
+                        "wait" -> {
+                            val waitMs = action.optLong("ms", 1000)
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 runAgentLoop(stepCount + 1)
-                            }, 600L)
-                        } else {
-                            handleFailure("Поле ввода не найдено на экране.")
+                            }, waitMs)
                         }
-                    }
-                    "speak" -> {
-                        val text = action.optString("text")
-                        speak(text)
-                        isRunning = false
-                        onDoneCallback?.invoke()
-                    }
-                    "wait" -> {
-                        val waitMs = action.optLong("ms", 1000)
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            runAgentLoop(stepCount + 1)
-                        }, waitMs)
-                    }
-                    "done" -> {
-                        val text = action.optString("text", "Готово.")
-                        speak(text)
-                        isRunning = false
-                        onDoneCallback?.invoke()
-                    }
-                    else -> {
-                        handleFailure("Неизвестное действие: $actionType")
+                        "done" -> {
+                            val text = action.optString("text", "Готово.")
+                            speak(text)
+                            isRunning = false
+                            onDoneCallback?.invoke()
+                        }
+                        else -> {
+                            handleFailure("Неизвестное действие: $actionType")
+                        }
                     }
                 }
             }
 
             override fun onFailure(error: String) {
-                handleFailure("Ошибка: $error")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    handleFailure("Ошибка: $error")
+                }
             }
         })
     }

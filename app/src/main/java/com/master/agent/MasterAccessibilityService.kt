@@ -55,13 +55,16 @@ class MasterAccessibilityService : AccessibilityService() {
         if (node == null) return
 
         try {
-            val text = node.text?.toString() ?: node.contentDescription?.toString()
+            val textVal = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
             val isClickable = node.isClickable
             val isScrollable = node.isScrollable
-            val className = node.className?.toString()
-            val resourceId = node.viewIdResourceName
+            val className = node.className?.toString() ?: ""
+            val resourceId = node.viewIdResourceName ?: ""
             
-            if (!text.isNullOrEmpty() || isClickable || isScrollable || !resourceId.isNullOrEmpty()) {
+            val isInteractive = isClickable || isScrollable || className.contains("EditText", ignoreCase = true) || className.contains("Button", ignoreCase = true)
+            val hasContent = textVal.trim().isNotEmpty()
+            
+            if (hasContent || isInteractive) {
                 val rect = Rect()
                 node.getBoundsInScreen(rect)
                 
@@ -75,11 +78,11 @@ class MasterAccessibilityService : AccessibilityService() {
                 }
 
                 val element = JSONObject().apply {
-                    put("text", text ?: "")
+                    put("text", textVal)
                     put("clickable", isClickable)
                     put("scrollable", isScrollable)
-                    put("class", className ?: "")
-                    put("id", resourceId ?: "")
+                    put("class", className)
+                    put("id", resourceId)
                     put("bounds", boundsJson)
                 }
                 
