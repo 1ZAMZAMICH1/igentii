@@ -21,8 +21,11 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var orchestrator: BrainOrchestrator? = null
     private var isListening = false
-    private var isAwaitingCommand = false // true = режим приёма команды после вейк-ворда
+    private var isAwaitingCommand = false
     private var audioManager: AudioManager? = null
+    
+    // Храним оригинальную громкость системного канала
+    private var originalSystemVolume = -1
     private val handler = Handler(Looper.getMainLooper())
 
     companion object {
@@ -32,8 +35,17 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     override fun onCreate() {
         super.onCreate()
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        tts = TextToSpeech(this, this)
+        
+        // Глушим системные звуки (клики, уведомления и БИПЫ Google-распознавателя)
+        // пока работает служба голосовой активации. Это скроет бесконечные звуки старта/стопа.
+        try {
+            originalSystemVolume = audioManager?.getStreamVolume(AudioManager.STREAM_SYSTEM) ?: -1
+            audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not adjust system volume stream", e)
+        }
 
+        tts = TextToSpeech(this, this)
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
@@ -49,9 +61,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
             override fun onError(error: Int) {
                 isListening = false
-                // Тихо перезапускаем, без звуков и задержек
+                // Тихо перезапускаем в случае тайм-аута тишины
                 if (!isAwaitingCommand) {
-                    handler.postDelayed({ startListeningQuiet() }, 300L)
+                    handler.postDelayed({ startListeningQuiet() }, 200L)
                 }
             }
 
@@ -60,37 +72,32 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
                     val text = matches[0].lowercase(Locale.ROOT).trim()
-                    Log.d(TAG, "Heard: $text | awaitingCommand=$isAwaitingCommand")
+                    Log.d(TAG, "Heard: $text")
 
                     if (isAwaitingCommand) {
-                        // Это команда пользователя после вейк-ворда
                         isAwaitingCommand = false
                         if (text.isNotEmpty()) {
                             orchestrator?.executeCommand(text)
                         } else {
-                            speak("Не расслышал. Попробуй снова.")
-                            handler.postDelayed({ startListeningQuiet() }, 300L)
+                            speak("Не расслышал.")
+                            handler.postDelayed({ startListeningQuiet() }, 400L)
                         }
                     } else {
-                        // Проверяем вейк-ворд
                         val hasTrigger = text.contains("мастер") || text.contains("master")
                         if (hasTrigger) {
-                            // Проверяем, есть ли команда сразу после вейк-ворда
                             val command = extractCommandAfterTrigger(text)
                             if (command.isNotEmpty()) {
-                                // Команда уже в одной фразе: "Мастер, открой телеграм"
                                 orchestrator?.executeCommand(command)
                             } else {
-                                // Только вейк-ворд — переходим в режим ожидания команды
                                 speakThenListen("Слушаю")
                             }
                         } else {
-                            handler.postDelayed({ startListeningQuiet() }, 300L)
+                            handler.postDelayed({ startListeningQuiet() }, 200L)
                         }
                     }
                 } else {
                     if (!isAwaitingCommand) {
-                        handler.postDelayed({ startListeningQuiet() }, 300L)
+                        handler.postDelayed({ startListeningQuiet() }, 200L)
                     }
                 }
             }
@@ -102,8 +109,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         if (apiKey.isNotEmpty()) {
             tts?.let {
                 orchestrator = BrainOrchestrator(applicationContext, apiKey, it) {
-                    // Когда оркестратор заканчивает, возвращаемся к тихому прослушиванию
-                    handler.postDelayed({ startListeningQuiet() }, 800L)
+                    // Команда выполнена. Возвращаемся в тихий режим локального ожидания "Мастера"
+                    handler.postDelayed({ startListeningQuiet() }, 400L)
                 }
             }
         }
@@ -111,36 +118,32 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         return START_STICKY
     }
 
-    // Запуск без системных звуков
     private fun startListeningQuiet() {
         if (isListening) return
-        // Заглушаем системный звук старта/стопа микрофона
-        val currentVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
-        audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-
         isListening = true
         isAwaitingCommand = false
+        
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
         }
-        speechRecognizer?.startListening(intent)
-
-        // Восстанавливаем громкость через 300мс
-        handler.postDelayed({
-            audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, currentVolume, 0)
-        }, 300L)
+        
+        try {
+            // Принудительно глушим системный звук прямо перед запуском
+            audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting voice detection", e)
+        }
     }
 
-    // Запуск для приёма команды (чуть дольше тишина, другой промпт)
     private fun startListeningForCommand() {
         if (isListening) return
         isListening = true
         isAwaitingCommand = true
+        
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
@@ -148,7 +151,12 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
         }
-        speechRecognizer?.startListening(intent)
+        
+        try {
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting command listening", e)
+        }
     }
 
     private fun speakThenListen(text: String) {
@@ -181,7 +189,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale("ru", "RU")
-            tts?.setSpeechRate(1.1f) // Чуть быстрее стандартного
+            tts?.setSpeechRate(1.15f) // Делаем голос быстрее и менее занудным
             tts?.setPitch(1.0f)
         }
     }
@@ -190,6 +198,14 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Восстанавливаем оригинальную громкость системных звуков при выключении службы
+        if (originalSystemVolume != -1) {
+            try {
+                audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, originalSystemVolume, 0)
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not restore system volume stream", e)
+            }
+        }
         speechRecognizer?.destroy()
         tts?.shutdown()
         handler.removeCallbacksAndMessages(null)

@@ -54,39 +54,46 @@ class MasterAccessibilityService : AccessibilityService() {
     private fun parseNodeRecursive(node: AccessibilityNodeInfo?, elements: JSONArray) {
         if (node == null) return
 
-        val text = node.text?.toString() ?: node.contentDescription?.toString()
-        val isClickable = node.isClickable
-        val isScrollable = node.isScrollable
-        val className = node.className?.toString()
-        val resourceId = node.viewIdResourceName
-        
-        if (!text.isNullOrEmpty() || isClickable || isScrollable || !resourceId.isNullOrEmpty()) {
-            val rect = Rect()
-            node.getBoundsInScreen(rect)
+        try {
+            val text = node.text?.toString() ?: node.contentDescription?.toString()
+            val isClickable = node.isClickable
+            val isScrollable = node.isScrollable
+            val className = node.className?.toString()
+            val resourceId = node.viewIdResourceName
             
-            val boundsJson = JSONObject().apply {
-                put("left", rect.left)
-                put("top", rect.top)
-                put("right", rect.right)
-                put("bottom", rect.bottom)
-                put("centerX", rect.centerX())
-                put("centerY", rect.centerY())
+            if (!text.isNullOrEmpty() || isClickable || isScrollable || !resourceId.isNullOrEmpty()) {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                
+                val boundsJson = JSONObject().apply {
+                    put("left", rect.left)
+                    put("top", rect.top)
+                    put("right", rect.right)
+                    put("bottom", rect.bottom)
+                    put("centerX", rect.centerX())
+                    put("centerY", rect.centerY())
+                }
+
+                val element = JSONObject().apply {
+                    put("text", text ?: "")
+                    put("clickable", isClickable)
+                    put("scrollable", isScrollable)
+                    put("class", className ?: "")
+                    put("id", resourceId ?: "")
+                    put("bounds", boundsJson)
+                }
+                
+                elements.put(element)
             }
 
-            val element = JSONObject().apply {
-                put("text", text ?: "")
-                put("clickable", isClickable)
-                put("scrollable", isScrollable)
-                put("class", className ?: "")
-                put("id", resourceId ?: "")
-                put("bounds", boundsJson)
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i)
+                if (child != null) {
+                    parseNodeRecursive(child, elements)
+                }
             }
-            
-            elements.put(element)
-        }
-
-        for (i in 0 until node.childCount) {
-            parseNodeRecursive(node.getChild(i), elements)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing node recursive", e)
         }
     }
 
