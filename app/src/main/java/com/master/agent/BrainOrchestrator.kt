@@ -10,7 +10,8 @@ import org.json.JSONObject
 class BrainOrchestrator(
     private val context: Context,
     private val apiKey: String,
-    private val tts: TextToSpeech
+    private val tts: TextToSpeech,
+    private val onDoneCallback: (() -> Unit)? = null
 ) {
     private val brain = BrainService(apiKey)
     private val history = StringBuilder()
@@ -24,7 +25,7 @@ class BrainOrchestrator(
 
     fun executeCommand(instruction: String) {
         if (isRunning) {
-            speak("Я уже выполняю предыдущую задачу. Пожалуйста, подождите.")
+            speak("Уже выполняю. Подожди.")
             return
         }
         
@@ -32,22 +33,24 @@ class BrainOrchestrator(
         history.clear()
         isRunning = true
         
-        speak("Принято, хозяин. Начинаю выполнять: $instruction")
+        speak("Принято.")
         runAgentLoop(0)
     }
 
     private fun runAgentLoop(stepCount: Int) {
         if (!isRunning) return
         if (stepCount >= MAX_STEPS) {
-            speak("Задача заняла слишком много шагов. Я останавливаюсь во избежание ошибок.")
+            speak("Потребовалось слишком много шагов. Останавливаюсь.")
             isRunning = false
+            onDoneCallback?.invoke()
             return
         }
 
         val service = MasterAccessibilityService.instance
         if (service == null) {
-            speak("Служба специальных возможностей не активна. Включите её в настройках телефона.")
+            speak("Служба специальных возможностей не активна.")
             isRunning = false
+            onDoneCallback?.invoke()
             return
         }
 
@@ -69,7 +72,7 @@ class BrainOrchestrator(
                             launchApp(packageName)
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 runAgentLoop(stepCount + 1)
-                            }, 1500L)
+                            }, 1200L)
                         } else {
                             handleFailure("Не указано имя пакета для запуска.")
                         }
@@ -82,9 +85,9 @@ class BrainOrchestrator(
                                 if (success) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                         runAgentLoop(stepCount + 1)
-                                    }, 1000L)
+                                    }, 700L)
                                 } else {
-                                    handleFailure("Не удалось симулировать клик в координатах $x, $y")
+                                    handleFailure("Не удалось нажать на элемент.")
                                 }
                             }
                         } else {
@@ -101,7 +104,7 @@ class BrainOrchestrator(
                             if (success) {
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     runAgentLoop(stepCount + 1)
-                                }, 1200L)
+                                }, 800L)
                             } else {
                                 handleFailure("Свайп не удался.")
                             }
@@ -116,15 +119,16 @@ class BrainOrchestrator(
                             focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 runAgentLoop(stepCount + 1)
-                            }, 800L)
+                            }, 600L)
                         } else {
-                            handleFailure("Фокус ввода текста не найден на экране.")
+                            handleFailure("Поле ввода не найдено на экране.")
                         }
                     }
                     "speak" -> {
                         val text = action.optString("text")
                         speak(text)
                         isRunning = false
+                        onDoneCallback?.invoke()
                     }
                     "wait" -> {
                         val waitMs = action.optLong("ms", 1000)
@@ -133,9 +137,10 @@ class BrainOrchestrator(
                         }, waitMs)
                     }
                     "done" -> {
-                        val text = action.optString("text", "Готово, хозяин! Задача выполнена.")
+                        val text = action.optString("text", "Готово.")
                         speak(text)
                         isRunning = false
+                        onDoneCallback?.invoke()
                     }
                     else -> {
                         handleFailure("Неизвестное действие: $actionType")
@@ -144,7 +149,7 @@ class BrainOrchestrator(
             }
 
             override fun onFailure(error: String) {
-                handleFailure("Ошибка связи с мозгом: $error")
+                handleFailure("Ошибка: $error")
             }
         })
     }
@@ -155,13 +160,14 @@ class BrainOrchestrator(
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(launchIntent)
         } else {
-            Log.e(TAG, "Application package $packageName not found or has no launch intent")
+            Log.e(TAG, "Package $packageName not found")
         }
     }
 
     private fun handleFailure(errorMessage: String) {
         speak(errorMessage)
         isRunning = false
+        onDoneCallback?.invoke()
         Log.e(TAG, errorMessage)
     }
 
