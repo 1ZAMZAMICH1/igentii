@@ -24,7 +24,7 @@ class BrainService(private val apiKey: String) {
 
     companion object {
         private const val TAG = "MasterBrain"
-        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateContent"
+        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText"
         private const val MAX_RETRIES = 3
         private const val INITIAL_RETRY_DELAY_MS = 1000L
     }
@@ -74,18 +74,14 @@ class BrainService(private val apiKey: String) {
         """.trimIndent()
 
         // Construct the raw Gemini JSON payload
-        val requestBodyJson = JSONObject().apply {
-            put("systemInstruction", JSONObject().apply {
-                put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
-            })
-            put("contents", JSONArray().put(JSONObject().apply {
-                put("parts", JSONArray().put(JSONObject().put("text", prompt)))
-            }))
-            // Enforce structured JSON output format
-            put("generationConfig", JSONObject().apply {
+            val requestBodyJson = JSONObject().apply {
+                put("prompt", JSONObject().apply {
+                    put("text", "$systemInstruction\n\n$prompt")
+                })
                 put("responseMimeType", "application/json")
-            })
-        }
+                put("temperature", 0.2)
+                put("maxOutputTokens", 1024)
+            }
 
         val request = Request.Builder()
             .url("$GEMINI_URL?key=$apiKey")
@@ -122,10 +118,9 @@ class BrainService(private val apiKey: String) {
                     val rootJson = JSONObject(responseStr)
                     val candidates = rootJson.getJSONArray("candidates")
                     val firstCandidate = candidates.getJSONObject(0)
-                    val content = firstCandidate.getJSONObject("content")
-                    val parts = content.getJSONArray("parts")
-                    val responseText = parts.getJSONObject(0).getString("text").trim()
-                    val actionJson = JSONObject(responseText)
+                        val responseText = firstCandidate.optString("output", null)
+                            ?: firstCandidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                        val actionJson = JSONObject(responseText.trim())
                     callback.onSuccess(actionJson)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse Gemini response: $responseStr", e)
