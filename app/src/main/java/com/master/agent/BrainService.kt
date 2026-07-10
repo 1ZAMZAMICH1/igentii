@@ -24,10 +24,24 @@ class BrainService(private val apiKey: String) {
 
     companion object {
         private const val TAG = "MasterBrain"
-        private const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText"
+        private val ENDPOINT_VARIANTS = listOf(
+            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText", RequestMode.TEXT),
+            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.0-flash:generateText", RequestMode.TEXT),
+            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateMessage", RequestMode.MESSAGE),
+            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.0-flash:generateMessage", RequestMode.MESSAGE),
+            GeminiEndpoint("https://generativeai.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText", RequestMode.TEXT),
+            GeminiEndpoint("https://generativeai.googleapis.com/v1beta2/models/gemini-2.0-flash:generateText", RequestMode.TEXT)
+        )
         private const val MAX_RETRIES = 3
         private const val INITIAL_RETRY_DELAY_MS = 1000L
     }
+
+    private enum class RequestMode {
+        TEXT,
+        MESSAGE
+    }
+
+    private data class GeminiEndpoint(val url: String, val mode: RequestMode)
 
     interface BrainCallback {
         fun onSuccess(action: JSONObject)
@@ -69,21 +83,103 @@ class BrainService(private val apiKey: String) {
             $screenHierarchy
         """.trimIndent()
 
-        val requestBodyJson = JSONObject().apply {
-            put("prompt", JSONObject().apply {
-                put("text", "$systemInstruction\n\n$prompt")
-            })
+        sendRequestWithFallback(systemInstruction, prompt, callback, 0)
+    }
+
+    private fun sendRequestWithFallback(systemInstruction: String, prompt: String, callback: BrainCallback, index: Int) {
+        if (index >= ENDPOINT_VARIANTS.size) {
+            callback.onFailure("Все варианты Gemini API закончились. Проверьте ключ и доступность модели.")
+            return
+        }
+
+        val endpoint = ENDPOINT_VARIANTS[index]
+        val requestBodyJson = buildRequestBody(systemInstruction, prompt, endpoint.mode)
+        val request = Request.Builder()
+            .url("${endpoint.url}?key=$apiKey")
+            .post(requestBodyJson.toString().toRequestBody(mediaType))
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                Log.e(TAG, "Gemini API request failed for ${endpoint.url}", e)
+                callback.onFailure(e.message ?: "Network error")
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                val responseStr = response.body?.string()
+                if (!response.isSuccessful || responseStr == null) {
+                    val code = response.code
+                    Log.e(TAG, "Gemini API returned error code $code for ${endpoint.url}: $responseStr")
+                    if (code == 400 || code == 403 || code == 404) {
+                        Log.w(TAG, "Falling back to next Gemini endpoint. Tried: ${endpoint.url}")
+                        sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
+                        return
+                    }
+                    if ((code == 429 || code >= 500) && index < ENDPOINT_VARIANTS.size - 1) {
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
+                        }, INITIAL_RETRY_DELAY_MS)
+                        return
+                    }
+                    callback.onFailure("API Error code $code")
+                    return
+                }
+
+                try {
+                    val rootJson = JSONObject(responseStr)
+                    val candidates = rootJson.getJSONArray("candidates")
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val responseText = firstCandidate.optString("output", null)
+                        ?: firstCandidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                    val actionJson = JSONObject(responseText.trim())
+                    callback.onSuccess(actionJson)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse Gemini response from ${endpoint.url}: $responseStr", e)
+                    if (index < ENDPOINT_VARIANTS.size - 1) {
+                        sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
+                    } else {
+                        callback.onFailure("Parsing error: ${e.message}")
+                    }
+                }
+            }
+        })
+    }
+
+    private fun buildRequestBody(systemInstruction: String, prompt: String, mode: RequestMode): JSONObject {
+        return JSONObject().apply {
+            when (mode) {
+                RequestMode.TEXT -> {
+                    put("prompt", JSONObject().apply {
+                        put("text", "$systemInstruction\n\n$prompt")
+                    })
+                }
+                RequestMode.MESSAGE -> {
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("author", "system")
+                            put("content", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("type", "text")
+                                    put("text", systemInstruction)
+                                })
+                            })
+                        })
+                        put(JSONObject().apply {
+                            put("author", "user")
+                            put("content", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("type", "text")
+                                    put("text", prompt)
+                                })
+                            })
+                        })
+                    })
+                }
+            }
             put("temperature", 0.2)
             put("maxOutputTokens", 1024)
             put("topP", 0.95)
         }
-
-        val request = Request.Builder()
-            .url("$GEMINI_URL?key=$apiKey")
-            .post(requestBodyJson.toString().toRequestBody(mediaType))
-            .build()
-
-        sendRequest(request, callback, MAX_RETRIES, INITIAL_RETRY_DELAY_MS)
     }
 
     private fun sendRequest(request: Request, callback: BrainCallback, retriesLeft: Int, delayMs: Long) {
