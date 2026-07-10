@@ -78,9 +78,9 @@ class BrainService(private val apiKey: String) {
                 put("prompt", JSONObject().apply {
                     put("text", "$systemInstruction\n\n$prompt")
                 })
-                put("responseMimeType", "application/json")
                 put("temperature", 0.2)
                 put("maxOutputTokens", 1024)
+                put("topP", 0.95)
             }
 
         val request = Request.Builder()
