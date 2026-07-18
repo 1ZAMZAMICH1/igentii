@@ -106,9 +106,12 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val apiKey = intent?.getStringExtra("API_KEY") ?: ""
+        val apiUrl = intent?.getStringExtra("API_URL") ?: "https://generativelanguage.googleapis.com"
+        val modelName = intent?.getStringExtra("MODEL_NAME") ?: "gemini-2.0-flash"
+        
         if (apiKey.isNotEmpty()) {
             tts?.let {
-                orchestrator = BrainOrchestrator(applicationContext, apiKey, it) {
+                orchestrator = BrainOrchestrator(applicationContext, apiKey, it, apiUrl, modelName) {
                     // Команда выполнена. Возвращаемся в тихий режим локального ожидания "Мастера"
                     handler.postDelayed({ startListeningQuiet() }, 400L)
                 }

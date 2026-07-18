@@ -11,9 +11,11 @@ class BrainOrchestrator(
     private val context: Context,
     private val apiKey: String,
     private val tts: TextToSpeech,
+    private val apiBaseUrl: String = "https://generativelanguage.googleapis.com",
+    private val modelName: String = "gemini-2.0-flash",
     private val onDoneCallback: (() -> Unit)? = null
 ) {
-    private val brain = BrainService(apiKey)
+    private val brain = BrainService(apiKey, apiBaseUrl, modelName)
     private val history = StringBuilder()
     private var currentInstruction = ""
     private var isRunning = false

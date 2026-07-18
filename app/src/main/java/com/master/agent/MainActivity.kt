@@ -18,6 +18,8 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var apiKeyInput: EditText
+    private lateinit var apiUrlInput: EditText
+    private lateinit var modelNameInput: EditText
     private lateinit var saveButton: Button
     private lateinit var accessibilityButton: Button
     private lateinit var wakeWordButton: Button
@@ -37,19 +39,33 @@ class MainActivity : AppCompatActivity() {
         val titleView = TextView(this).apply {
             text = "Мастер: Автономный ИИ Ассистент"
             textSize = 24f
-            setPadding(0, 20, 0, 50)
+            setPadding(0, 20, 0, 40)
             textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
         }
         container.addView(titleView)
 
         apiKeyInput = EditText(this).apply {
-            hint = "Введите ваш Gemini API Key"
+            hint = "Введите API Key (Gemini, DeepSeek, etc.)"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         container.addView(apiKeyInput)
 
+        apiUrlInput = EditText(this).apply {
+            hint = "API Base URL (например: https://api.deepseek.com/v1)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+        }
+        container.addView(apiUrlInput)
+
+        modelNameInput = EditText(this).apply {
+            hint = "Имя модели (например: deepseek-chat)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+        }
+        container.addView(modelNameInput)
+
         saveButton = Button(this).apply {
-            text = "Сохранить API Key"
+            text = "Сохранить настройки"
         }
         container.addView(saveButton)
 
@@ -73,18 +89,28 @@ class MainActivity : AppCompatActivity() {
         setContentView(container)
 
         val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return
+        
+        // Загружаем сохраненные данные
         val savedKey = sharedPref.getString("GEMINI_API_KEY", "")
+        val savedUrl = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com")
+        val savedModel = sharedPref.getString("MODEL_NAME", "gemini-2.0-flash")
+        
         apiKeyInput.setText(savedKey)
+        apiUrlInput.setText(savedUrl)
+        modelNameInput.setText(savedModel)
 
         saveButton.setOnClickListener {
             val key = apiKeyInput.text.toString().trim()
-            if (key.isNotEmpty()) {
-                with(sharedPref.edit()) {
-                    putString("GEMINI_API_KEY", key)
-                    apply()
-                }
-                Toast.makeText(this, "API Key сохранен!", Toast.LENGTH_SHORT).show()
+            val url = apiUrlInput.text.toString().trim()
+            val model = modelNameInput.text.toString().trim()
+            
+            with(sharedPref.edit()) {
+                putString("GEMINI_API_KEY", key)
+                putString("API_URL", url)
+                putString("MODEL_NAME", model)
+                apply()
             }
+            Toast.makeText(this, "Настройки сохранены!", Toast.LENGTH_SHORT).show()
         }
 
         accessibilityButton.setOnClickListener {
@@ -94,14 +120,19 @@ class MainActivity : AppCompatActivity() {
 
         wakeWordButton.setOnClickListener {
             val key = sharedPref.getString("GEMINI_API_KEY", "") ?: ""
+            val url = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com") ?: "https://generativelanguage.googleapis.com"
+            val model = sharedPref.getString("MODEL_NAME", "gemini-2.0-flash") ?: "gemini-2.0-flash"
+            
             if (key.isEmpty()) {
-                Toast.makeText(this, "Пожалуйста, сначала сохраните API Key!", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Пожалуйста, сначала введите API Key!", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
 
             if (checkMicPermission()) {
                 startService(Intent(this, WakeWordService::class.java).apply {
                     putExtra("API_KEY", key)
+                    putExtra("API_URL", url)
+                    putExtra("MODEL_NAME", model)
                 })
                 Toast.makeText(this, "Служба Мастера запущена!", Toast.LENGTH_SHORT).show()
             } else {

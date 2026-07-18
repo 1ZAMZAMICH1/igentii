@@ -1,8 +1,6 @@
 package com.master.agent
 
 import android.util.Log
-import android.os.Handler
-import android.os.Looper
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -12,7 +10,11 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class BrainService(private val apiKey: String) {
+class BrainService(
+    private val apiKey: String,
+    private val apiBaseUrl: String = "https://generativelanguage.googleapis.com",
+    private val modelName: String = "gemini-2.0-flash"
+) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -24,24 +26,7 @@ class BrainService(private val apiKey: String) {
 
     companion object {
         private const val TAG = "MasterBrain"
-        private val ENDPOINT_VARIANTS = listOf(
-            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText", RequestMode.TEXT),
-            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.0-flash:generateText", RequestMode.TEXT),
-            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateMessage", RequestMode.MESSAGE),
-            GeminiEndpoint("https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.0-flash:generateMessage", RequestMode.MESSAGE),
-            GeminiEndpoint("https://generativeai.googleapis.com/v1beta2/models/gemini-2.5-flash:generateText", RequestMode.TEXT),
-            GeminiEndpoint("https://generativeai.googleapis.com/v1beta2/models/gemini-2.0-flash:generateText", RequestMode.TEXT)
-        )
-        private const val MAX_RETRIES = 3
-        private const val INITIAL_RETRY_DELAY_MS = 1000L
     }
-
-    private enum class RequestMode {
-        TEXT,
-        MESSAGE
-    }
-
-    private data class GeminiEndpoint(val url: String, val mode: RequestMode)
 
     interface BrainCallback {
         fun onSuccess(action: JSONObject)
@@ -57,19 +42,19 @@ class BrainService(private val apiKey: String) {
             IMPORTANT:
              - Base your decision on the provided "screenHierarchy" which includes coordinates for elements (bounds).
              - Try to reach the target by clicking elements. If you need to open an app, use 'launch_app' action with the correct package name (e.g. "com.whatsapp", "ru.yandex.music").
-             - If you need to speak to the user (e.g. read messages aloud or ask a question), use the 'speak' action.
+             - If you need to speak to the user, use the 'speak' action.
              - If the task is completed, return the 'done' action.
 
-            You MUST respond ONLY with a JSON object in this format:
+            You MUST respond ONLY with a JSON object in this format. Do not add markdown wrapping like ```json or text before/after. Return raw JSON code:
             {
                "reasoning": "Brief explanation of what you see and what you are doing",
                "action": "click" | "swipe" | "type" | "launch_app" | "speak" | "done" | "wait",
-               "x": Float (optional, for click),
-               "y": Float (optional, for click),
-               "text": "text value" (optional, for type or speak),
-               "packageName": "com.whatsapp" (optional, for launch_app),
-               "startX": Float, "startY": Float, "endX": Float, "endY": Float, "duration": Long (optional, for swipe),
-               "ms": Long (optional, for wait)
+               "x": Float,
+               "y": Float,
+               "text": "text value",
+               "packageName": "com.whatsapp",
+               "startX": Float, "startY": Float, "endX": Float, "endY": Float, "duration": Long,
+               "ms": Long
             }
         """.trimIndent()
 
@@ -83,139 +68,101 @@ class BrainService(private val apiKey: String) {
             $screenHierarchy
         """.trimIndent()
 
-        sendRequestWithFallback(systemInstruction, prompt, callback, 0)
-    }
+        // Проверяем, какой тип API используется (Gemini или OpenAI-совместимый)
+        val isGemini = apiBaseUrl.contains("generativelanguage.googleapis.com") || apiBaseUrl.isEmpty()
 
-    private fun sendRequestWithFallback(systemInstruction: String, prompt: String, callback: BrainCallback, index: Int) {
-        if (index >= ENDPOINT_VARIANTS.size) {
-            callback.onFailure("Все варианты Gemini API закончились. Проверьте ключ и доступность модели.")
-            return
+        val requestBuilder = Request.Builder()
+
+        if (isGemini) {
+            val url = if (apiBaseUrl.endsWith("/")) "${apiBaseUrl}v1beta/models/$modelName:generateContent?key=$apiKey" 
+                      else "$apiBaseUrl/v1beta/models/$modelName:generateContent?key=$apiKey"
+            
+            val requestBodyJson = JSONObject().apply {
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
+                })
+                put("contents", JSONArray().put(JSONObject().apply {
+                    put("parts", JSONArray().put(JSONObject().put("text", prompt)))
+                }))
+                put("generationConfig", JSONObject().apply {
+                    put("responseMimeType", "application/json")
+                })
+            }
+            
+            requestBuilder.url(url)
+            requestBuilder.post(requestBodyJson.toString().toRequestBody(mediaType))
+        } else {
+            // Формат OpenAI / DeepSeek / Hugging Face / OpenRouter / Groq / Qwen / LLaMA
+            val url = if (apiBaseUrl.endsWith("/chat/completions")) apiBaseUrl 
+                      else if (apiBaseUrl.endsWith("/")) "${apiBaseUrl}chat/completions"
+                      else "$apiBaseUrl/chat/completions"
+
+            val requestBodyJson = JSONObject().apply {
+                put("model", modelName)
+                
+                val messagesArray = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemInstruction)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+                put("messages", messagesArray)
+                put("response_format", JSONObject().put("type", "json_object"))
+            }
+
+            requestBuilder.url(url)
+            requestBuilder.header("Authorization", "Bearer $apiKey")
+            requestBuilder.post(requestBodyJson.toString().toRequestBody(mediaType))
         }
 
-        val endpoint = ENDPOINT_VARIANTS[index]
-        val requestBodyJson = buildRequestBody(systemInstruction, prompt, endpoint.mode)
-        val request = Request.Builder()
-            .url("${endpoint.url}?key=$apiKey")
-            .post(requestBodyJson.toString().toRequestBody(mediaType))
-            .build()
-
-        client.newCall(request).enqueue(object : okhttp3.Callback {
+        client.newCall(requestBuilder.build()).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: IOException) {
-                Log.e(TAG, "Gemini API request failed for ${endpoint.url}", e)
+                Log.e(TAG, "API request failed", e)
                 callback.onFailure(e.message ?: "Network error")
             }
 
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                 val responseStr = response.body?.string()
                 if (!response.isSuccessful || responseStr == null) {
-                    val code = response.code
-                    Log.e(TAG, "Gemini API returned error code $code for ${endpoint.url}: $responseStr")
-                    if (code == 400 || code == 403 || code == 404) {
-                        Log.w(TAG, "Falling back to next Gemini endpoint. Tried: ${endpoint.url}")
-                        sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
-                        return
-                    }
-                    if ((code == 429 || code >= 500) && index < ENDPOINT_VARIANTS.size - 1) {
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
-                        }, INITIAL_RETRY_DELAY_MS)
-                        return
-                    }
-                    callback.onFailure("API Error code $code")
+                    Log.e(TAG, "API returned error code ${response.code}: $responseStr")
+                    callback.onFailure("API Error code ${response.code}")
                     return
                 }
 
                 try {
                     val rootJson = JSONObject(responseStr)
-                    val candidates = rootJson.getJSONArray("candidates")
-                    val firstCandidate = candidates.getJSONObject(0)
-                    val responseText = firstCandidate.optString("output", null)
-                        ?: firstCandidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                    val actionJson = JSONObject(responseText.trim())
-                    callback.onSuccess(actionJson)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse Gemini response from ${endpoint.url}: $responseStr", e)
-                    if (index < ENDPOINT_VARIANTS.size - 1) {
-                        sendRequestWithFallback(systemInstruction, prompt, callback, index + 1)
+                    val responseText = if (isGemini) {
+                        val candidates = rootJson.getJSONArray("candidates")
+                        val firstCandidate = candidates.getJSONObject(0)
+                        val content = firstCandidate.getJSONObject("content")
+                        val parts = content.getJSONArray("parts")
+                        parts.getJSONObject(0).getString("text").trim()
                     } else {
-                        callback.onFailure("Parsing error: ${e.message}")
+                        // OpenAI format parser
+                        val choices = rootJson.getJSONArray("choices")
+                        val firstChoice = choices.getJSONObject(0)
+                        val message = firstChoice.getJSONObject("message")
+                        message.getString("content").trim()
                     }
-                }
-            }
-        })
-    }
-
-    private fun buildRequestBody(systemInstruction: String, prompt: String, mode: RequestMode): JSONObject {
-        return JSONObject().apply {
-            when (mode) {
-                RequestMode.TEXT -> {
-                    put("prompt", JSONObject().apply {
-                        put("text", "$systemInstruction\n\n$prompt")
-                    })
-                }
-                RequestMode.MESSAGE -> {
-                    put("messages", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("author", "system")
-                            put("content", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("type", "text")
-                                    put("text", systemInstruction)
-                                })
-                            })
-                        })
-                        put(JSONObject().apply {
-                            put("author", "user")
-                            put("content", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("type", "text")
-                                    put("text", prompt)
-                                })
-                            })
-                        })
-                    })
-                }
-            }
-            put("temperature", 0.2)
-            put("maxOutputTokens", 1024)
-            put("topP", 0.95)
-        }
-    }
-
-    private fun sendRequest(request: Request, callback: BrainCallback, retriesLeft: Int, delayMs: Long) {
-        client.newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onFailure(call: okhttp3.Call, e: IOException) {
-                Log.e(TAG, "Gemini API request failed", e)
-                callback.onFailure(e.message ?: "Network error")
-            }
-
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                val responseStr = response.body?.string()
-                if (!response.isSuccessful || responseStr == null) {
-                    val code = response.code
-                    Log.e(TAG, "Gemini API returned error code $code: $responseStr")
-                    if ((code == 429 || code >= 500) && retriesLeft > 0) {
-                        Log.w(TAG, "Retrying Gemini request in ${delayMs}ms. Retries left: ${retriesLeft - 1}")
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            sendRequest(request, callback, retriesLeft - 1, delayMs * 2)
-                        }, delayMs)
-                        return
+                    
+                    // Очистка от ```json ... ``` оберток если модель проигнорировала инструкцию
+                    var cleanedText = responseText
+                    if (cleanedText.startsWith("```json")) {
+                        cleanedText = cleanedText.removePrefix("```json").trim()
                     }
-                    callback.onFailure("API Error code $code")
-                    return
-                }
-
-                try {
-                    val rootJson = JSONObject(responseStr)
-                    val candidates = rootJson.getJSONArray("candidates")
-                    val firstCandidate = candidates.getJSONObject(0)
-                    val responseText = firstCandidate.optString("output", null)
-                        ?: firstCandidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                    val actionJson = JSONObject(responseText.trim())
+                    if (cleanedText.endsWith("```")) {
+                        cleanedText = cleanedText.removeSuffix("```").trim()
+                    }
+                    
+                    val actionJson = JSONObject(cleanedText)
                     callback.onSuccess(actionJson)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse Gemini response: $responseStr", e)
-                    callback.onFailure("Parsing error: ${e.message}")
+                    Log.e(TAG, "Failed to parse API response: $responseStr", e)
+                    callback.onFailure("Parsing error. Respose was: $responseText")
                 }
             }
         })
