@@ -34,7 +34,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("ru").toString()) // Russian trigger
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-
+        
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -44,20 +44,20 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             override fun onEndOfSpeech() {
                 isListening = false
             }
-
+            
             override fun onError(error: Int) {
                 // Restart listening on timeout or silent errors
                 isListening = false
                 restartListening()
             }
-
+            
             override fun onResults(results: Bundle?) {
                 isListening = false
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
                     val text = matches[0].lowercase(Locale.ROOT)
                     Log.d(TAG, "Recognized speech: $text")
-
+                    
                     if (text.contains("мастер") || text.contains("master")) {
                         // The user triggers the agent! 
                         // Find instructions after the word "Мастер"
@@ -72,36 +72,38 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 }
                 restartListening()
             }
-
+            
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
     }
-
+    
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val apiKey = intent?.getStringExtra("API_KEY") ?: ""
+        val apiUrl = intent?.getStringExtra("API_URL") ?: ""
+        val modelName = intent?.getStringExtra("MODEL_NAME") ?: ""
         if (apiKey.isNotEmpty()) {
             tts?.let {
-                orchestrator = BrainOrchestrator(applicationContext, apiKey, it)
+                orchestrator = BrainOrchestrator(applicationContext, apiKey, apiUrl, modelName, it)
             }
         }
         startListening()
         return START_STICKY
     }
-
+    
     private fun startListening() {
         if (!isListening) {
             isListening = true
             speechRecognizer?.startListening(recognizerIntent)
         }
     }
-
+    
     private fun restartListening() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             startListening()
         }, 500)
     }
-
+    
     private fun extractCommand(text: String): String {
         val triggerRussian = "мастер"
         val triggerEnglish = "master"
@@ -117,21 +119,21 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         }
         return ""
     }
-
+    
     private fun triggerOrchestrator(command: String) {
         orchestrator?.executeCommand(command)
     }
-
+    
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale("ru")
         }
     }
-
+    
     override fun onBind(intent: Intent?): IBinder? {
         return null
     }
-
+    
     override fun onDestroy() {
         super.onDestroy()
         speechRecognizer?.destroy()

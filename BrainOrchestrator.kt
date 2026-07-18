@@ -11,9 +11,11 @@ import java.util.Locale
 class BrainOrchestrator(
     private val context: Context,
     private val apiKey: String,
+    private val apiUrl: String,
+    private val modelName: String,
     private val tts: TextToSpeech
 ) {
-    private val brain = BrainService(apiKey)
+    private val brain = BrainService(apiKey, apiUrl, modelName)
     private val history = StringBuilder()
     private var currentInstruction = ""
     private var isRunning = false
@@ -21,6 +23,16 @@ class BrainOrchestrator(
     companion object {
         private const val TAG = "MasterOrchestrator"
         private const val MAX_STEPS = 15
+    }
+
+    init {
+        // Determine provider based on API URL
+        when {
+            apiUrl.contains("localhost:11434") -> brain.setProvider("local")
+            apiUrl.contains("router.huggingface.co") -> brain.setProvider("huggingface")
+            apiUrl.contains("api.deepseek.com") -> brain.setProvider("deepseek")
+            else -> brain.setProvider("gemini")
+        }
     }
 
     fun executeCommand(instruction: String) {
@@ -60,7 +72,7 @@ class BrainOrchestrator(
                 val reasoning = action.optString("reasoning", "")
                 val actionType = action.optString("action", "done")
                 
-                Log.d(TAG, "Gemini action: $actionType. Reasoning: $reasoning")
+                Log.d(TAG, "Action: $actionType. Reasoning: $reasoning")
                 history.append("- Step $stepCount: Action=$actionType. Reason: $reasoning\n")
 
                 when (actionType) {
@@ -173,4 +185,10 @@ class BrainOrchestrator(
     private fun speak(text: String) {
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "UtteranceID")
     }
-}
+}</arg_value><arg_key>task_progress</arg_key><arg_value>- [x] Изучить структуру проекта
+- [x] Понять ошибки HF/DeepSeek
+- [x] Добавить поддержку локального inference (Ollama)
+- [x] Обновить MainActivity для выбора локального провайдера
+- [x] Обновить WakeWordService для передачи параметров
+- [x] Обновить BrainOrchestrator для поддержки локального inference
+- [ ] Тестировать работу без API‑ключей</arg_value></tool_call>

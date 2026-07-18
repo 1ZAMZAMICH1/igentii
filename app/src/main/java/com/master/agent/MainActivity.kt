@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(50, 40, 50, 40)
@@ -120,14 +120,14 @@ class MainActivity : AppCompatActivity() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
         providerSpinner.adapter = adapter
 
-        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return
-        
+        val sharedPref = getPreferences(Context.MODE_PRIVATE)
+
         // Загружаем сохраненные данные
         val savedProviderIndex = sharedPref.getInt("PROVIDER_INDEX", 0)
         val savedKey = sharedPref.getString("GEMINI_API_KEY", "")
         val savedUrl = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com")
         val savedModel = sharedPref.getString("MODEL_NAME", "gemini-1.5-flash")
-        
+
         providerSpinner.setSelection(savedProviderIndex)
         apiKeyInput.setText(savedKey)
         apiUrlInput.setText(savedUrl)
@@ -140,20 +140,24 @@ class MainActivity : AppCompatActivity() {
                     0 -> { // Gemini
                         apiUrlInput.setText("https://generativelanguage.googleapis.com")
                         modelNameInput.setText("gemini-1.5-flash")
+                        apiKeyInput.visibility = View.VISIBLE
                         setCustomFieldsVisible(false)
                     }
-                    1 -> { // Hugging Face (Llama 3)
-                        apiUrlInput.setText("https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct/v1")
+                    1 -> { // Hugging Face
+                        apiUrlInput.setText("https://router.huggingface.co/v1")
                         modelNameInput.setText("meta-llama/Meta-Llama-3-8B-Instruct")
+                        apiKeyInput.visibility = View.VISIBLE
                         setCustomFieldsVisible(false)
                     }
                     2 -> { // DeepSeek
                         apiUrlInput.setText("https://api.deepseek.com/chat/completions")
                         modelNameInput.setText("deepseek-chat")
+                        apiKeyInput.visibility = View.VISIBLE
                         setCustomFieldsVisible(false)
                     }
                     3 -> { // Custom
                         setCustomFieldsVisible(true)
+                        apiKeyInput.visibility = View.GONE // API Key не требуется для локального
                     }
                 }
             }
@@ -166,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             val key = apiKeyInput.text.toString().trim()
             val url = apiUrlInput.text.toString().trim()
             val model = modelNameInput.text.toString().trim()
-            
+
             with(sharedPref.edit()) {
                 putInt("PROVIDER_INDEX", position)
                 putString("GEMINI_API_KEY", key)
@@ -186,9 +190,9 @@ class MainActivity : AppCompatActivity() {
             val key = sharedPref.getString("GEMINI_API_KEY", "") ?: ""
             val url = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com") ?: "https://generativelanguage.googleapis.com"
             val model = sharedPref.getString("MODEL_NAME", "gemini-1.5-flash") ?: "gemini-1.5-flash"
-            
-            if (key.isEmpty()) {
-                Toast.makeText(this, "Пожалуйста, сначала введите API Key!", Toast.LENGTH_LONG).show()
+
+            if (key.isEmpty() && position != 3) { // API Key требуется для облачных провайдеров
+                Toast.makeText(this, "Пожалуйста, введите API Key!", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
 

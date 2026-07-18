@@ -111,7 +111,6 @@ class BrainService(
                     })
                 }
                 put("messages", messagesArray)
-                put("response_format", JSONObject().put("type", "json_object"))
             }
 
             requestBuilder.url(url)
