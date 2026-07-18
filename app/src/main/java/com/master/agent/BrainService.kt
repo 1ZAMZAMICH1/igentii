@@ -133,9 +133,10 @@ class BrainService(
                     return
                 }
 
+                var responseText = ""
                 try {
                     val rootJson = JSONObject(responseStr)
-                    val responseText = if (isGemini) {
+                    responseText = if (isGemini) {
                         val candidates = rootJson.getJSONArray("candidates")
                         val firstCandidate = candidates.getJSONObject(0)
                         val content = firstCandidate.getJSONObject("content")
@@ -162,7 +163,7 @@ class BrainService(
                     callback.onSuccess(actionJson)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse API response: $responseStr", e)
-                    callback.onFailure("Parsing error. Respose was: $responseText")
+                    callback.onFailure("Parsing error. Response was: $responseText")
                 }
             }
         })
