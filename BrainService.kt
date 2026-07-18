@@ -101,22 +101,44 @@ class BrainService(private val apiKey: String, private val apiUrl: String, priva
                     val code = response.code
                     Log.e(TAG, "API returned error code $code: $responseStr")
                     
-                    // Don't retry on client errors (4xx) - they won't be fixed by retrying
-                    if (code in 400..499) {
-                        callback.onFailure("API Error code $code: ${getErrorMessage(responseStr)}")
+                    // 402 - Payment Required: no credits on OpenRouter account
+                    if (code == 402) {
+                        callback.onFailure("ОШИБКА 402: Недостаточно средств на аккаунте OpenRouter. Пополните баланс на openrouter.ai или выберите бесплатную модель (например, 'google/gemini-2.5-flash' если есть кредит).")
                         return
                     }
                     
-                    // Retry on rate limit (429) or server errors (5xx)
-                    if ((code == 429 || code >= 500) && retriesLeft > 0) {
-                        Log.w(TAG, "Retrying in ${delayMs}ms. Retries left: ${retriesLeft - 1}")
+                    // 401/403 - Auth issues
+                    if (code == 401 || code == 403) {
+                        callback.onFailure("ОШИБКА $code: Неверный API ключ OpenRouter. Проверьте ключ в настройках приложения.")
+                        return
+                    }
+                    
+                    // 429 - Rate limit: retry with longer backoff
+                    if (code == 429 && retriesLeft > 0) {
+                        val waitTime = delayMs * 3 // longer backoff for rate limits
+                        Log.w(TAG, "Rate limit (429). Retrying in ${waitTime}ms. Retries left: ${retriesLeft - 1}")
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            sendRequest(request, callback, retriesLeft - 1, waitTime)
+                        }, waitTime)
+                        return
+                    }
+                    
+                    // Other 4xx - client errors, don't retry
+                    if (code in 400..499) {
+                        callback.onFailure("ОШИБКА $code: ${getErrorMessage(responseStr)}")
+                        return
+                    }
+                    
+                    // 5xx - server errors, retry
+                    if (code >= 500 && retriesLeft > 0) {
+                        Log.w(TAG, "Server error $code. Retrying in ${delayMs}ms. Retries left: ${retriesLeft - 1}")
                         Handler(Looper.getMainLooper()).postDelayed({
                             sendRequest(request, callback, retriesLeft - 1, delayMs * 2)
                         }, delayMs)
                         return
                     }
                     
-                    callback.onFailure("API Error code $code: ${getErrorMessage(responseStr)}")
+                    callback.onFailure("ОШИБКА $code: ${getErrorMessage(responseStr)}")
                     return
                 }
 
