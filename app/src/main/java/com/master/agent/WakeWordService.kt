@@ -23,9 +23,6 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private var isListening = false
     private var isAwaitingCommand = false
     private var audioManager: AudioManager? = null
-    
-    // Храним оригинальную громкость системного канала
-    private var originalSystemVolume = -1
     private val handler = Handler(Looper.getMainLooper())
 
     companion object {
@@ -35,17 +32,12 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     override fun onCreate() {
         super.onCreate()
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        
-        // Глушим системные звуки (клики, уведомления и БИПЫ Google-распознавателя)
-        // пока работает служба голосовой активации. Это скроет бесконечные звуки старта/стопа.
-        try {
-            originalSystemVolume = audioManager?.getStreamVolume(AudioManager.STREAM_SYSTEM) ?: -1
-            audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not adjust system volume stream", e)
-        }
-
         tts = TextToSpeech(this, this)
+        
+        initializeSpeechRecognizer()
+    }
+
+    private fun initializeSpeechRecognizer() {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
@@ -61,9 +53,10 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
             override fun onError(error: Int) {
                 isListening = false
-                // Тихо перезапускаем в случае тайм-аута тишины
+                // Тихо перезапускаем в случае таймаута тишины
                 if (!isAwaitingCommand) {
-                    handler.postDelayed({ startListeningQuiet() }, 200L)
+                    muteSystemBeepTemporarily()
+                    handler.postDelayed({ startListeningQuiet() }, 150L)
                 }
             }
 
@@ -92,12 +85,14 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                                 speakThenListen("Слушаю")
                             }
                         } else {
-                            handler.postDelayed({ startListeningQuiet() }, 200L)
+                            muteSystemBeepTemporarily()
+                            handler.postDelayed({ startListeningQuiet() }, 150L)
                         }
                     }
                 } else {
                     if (!isAwaitingCommand) {
-                        handler.postDelayed({ startListeningQuiet() }, 200L)
+                        muteSystemBeepTemporarily()
+                        handler.postDelayed({ startListeningQuiet() }, 150L)
                     }
                 }
             }
@@ -107,13 +102,13 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val apiKey = intent?.getStringExtra("API_KEY") ?: ""
         val apiUrl = intent?.getStringExtra("API_URL") ?: "https://generativelanguage.googleapis.com"
-        val modelName = intent?.getStringExtra("MODEL_NAME") ?: "gemini-2.0-flash"
+        val modelName = intent?.getStringExtra("MODEL_NAME") ?: "gemini-1.5-flash"
         
         if (apiKey.isNotEmpty()) {
             tts?.let {
                 orchestrator = BrainOrchestrator(applicationContext, apiKey, it, apiUrl, modelName) {
-                    // Команда выполнена. Возвращаемся в тихий режим локального ожидания "Мастера"
-                    handler.postDelayed({ startListeningQuiet() }, 400L)
+                    // Команда выполнена. Возвращаемся обратно в тихий режим ожидания wake-word
+                    handler.postDelayed({ startListeningQuiet() }, 300L)
                 }
             }
         }
@@ -133,13 +128,27 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
         
+        // Временно приглушаем системный звук на 400 миллисекунд прямо перед запуском распознавателя,
+        // чтобы заглушить раздражающий старт-бип от Google, не переводя телефон в постоянный беззвучный режим.
+        val originalVol = audioManager?.getStreamVolume(AudioManager.STREAM_SYSTEM) ?: -1
         try {
-            // Принудительно глушим системный звук прямо перед запуском
             audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+        } catch (e: Exception) {}
+
+        try {
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting voice detection", e)
         }
+
+        // Возвращаем системную громкость обратно сразу после старта
+        handler.postDelayed({
+            try {
+                if (originalVol != -1) {
+                    audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVol, 0)
+                }
+            } catch (e: Exception) {}
+        }, 400L)
     }
 
     private fun startListeningForCommand() {
@@ -160,6 +169,21 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e(TAG, "Error starting command listening", e)
         }
+    }
+
+    private fun muteSystemBeepTemporarily() {
+        val originalVol = audioManager?.getStreamVolume(AudioManager.STREAM_SYSTEM) ?: -1
+        try {
+            audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+        } catch (e: Exception) {}
+        
+        handler.postDelayed({
+            try {
+                if (originalVol != -1) {
+                    audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVol, 0)
+                }
+            } catch (e: Exception) {}
+        }, 400L)
     }
 
     private fun speakThenListen(text: String) {
@@ -192,7 +216,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale("ru", "RU")
-            tts?.setSpeechRate(1.15f) // Делаем голос быстрее и менее занудным
+            tts?.setSpeechRate(1.15f)
             tts?.setPitch(1.0f)
         }
     }
@@ -201,14 +225,6 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Восстанавливаем оригинальную громкость системных звуков при выключении службы
-        if (originalSystemVolume != -1) {
-            try {
-                audioManager?.setStreamVolume(AudioManager.STREAM_SYSTEM, originalSystemVolume, 0)
-            } catch (e: Exception) {
-                Log.e(TAG, "Could not restore system volume stream", e)
-            }
-        }
         speechRecognizer?.destroy()
         tts?.shutdown()
         handler.removeCallbacksAndMessages(null)
