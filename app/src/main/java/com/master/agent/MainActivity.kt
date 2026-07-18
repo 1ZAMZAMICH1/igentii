@@ -187,6 +187,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         wakeWordButton.setOnClickListener {
+            val position = providerSpinner.selectedItemPosition
             val key = sharedPref.getString("GEMINI_API_KEY", "") ?: ""
             val url = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com") ?: "https://generativelanguage.googleapis.com"
             val model = sharedPref.getString("MODEL_NAME", "gemini-1.5-flash") ?: "gemini-1.5-flash"
