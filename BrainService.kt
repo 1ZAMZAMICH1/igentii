@@ -25,7 +25,7 @@ class BrainService(private val apiKey: String, private val apiUrl: String, priva
         private const val TAG = "MasterBrain"
         private const val MAX_RETRIES = 3
         private const val INITIAL_RETRY_DELAY_MS = 1000L
-        var currentProvider: String = "gemini"
+        var currentProvider: String = "openrouter"
     }
 
     interface BrainCallback {
@@ -56,81 +56,35 @@ class BrainService(private val apiKey: String, private val apiUrl: String, priva
             $screenHierarchy
         """.trimIndent()
 
-        // Build provider-specific request
-        val requestBuilder = when (currentProvider) {
-            "gemini" -> {
-                // Gemini-specific payload
-                val requestBodyJson = JSONObject().apply {
-                    put("systemInstruction", JSONObject().apply {
-                        put("parts", JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("text", systemInstruction)
-                            })
-                        })
-                    })
-                    put("contents", JSONArray().apply {
-                        put("parts", JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("text", prompt)
-                            })
-                        })
-                    })
-                    put("generationConfig", JSONObject().apply {
-                        put("responseMimeType", "application/json")
-                        put("temperature", 0.2)
-                        put("maxOutputTokens", 1024)
-                        put("topP", 0.95)
-                    })
-                }
-
-                Request.Builder()
-                    .url("$GEMINI_URL?key=$apiKey")
-                    .post(requestBodyJson.toString().toRequestBody(mediaType))
-            }
-            "huggingface" -> {
-                // Placeholder for HF request - using generic payload
-                val hfPayload = JSONObject().apply {
-                    put("model", modelName)
-                    put("messages", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("role", "user")
-                            put("content", prompt)
-                        })
-                    })
-                }
-
-                Request.Builder()
-                    .url(apiUrl)
-                    .post(hfPayload.toString().toRequestBody(MediaType.parse("application/json")))
-            }
-            "deepseek" -> {
-                // Placeholder for DeepSeek request
-                val dsPayload = JSONObject().apply {
-                    put("model", modelName)
-                    put("prompt", prompt)
-                    put("max_tokens", 1024)
-                    put("temperature", 0.2)
-                }
-
-                Request.Builder()
-                    .url("https://api.deepseek.com/chat/completions")
-                    .post(dsPayload.toString().toRequestBody(MediaType.parse("application/json")))
-            }
-            "local" -> {
-                // Ollama local request
-                val localPayload = JSONObject().apply {
-                    put("model", modelName)
-                    put("prompt", prompt)
-                }
-
-                Request.Builder()
-                    .url("http://localhost:11434/api/generate")
-                    .post(localPayload.toString().toRequestBody(MediaType.parse("application/json")))
-            }
-            else -> Request.Builder().url("").post("".toRequestBody(MediaType.parse("application/json")))
+        // OpenRouter uses OpenAI-compatible API
+        val requestBodyJson = JSONObject().apply {
+            put("model", modelName)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemInstruction)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
+            put("temperature", 0.2)
+            put("max_tokens", 1024)
+            put("response_format", JSONObject().apply {
+                put("type", "json_object")
+            })
         }
 
-        val request = requestBuilder.build()
+        val request = Request.Builder()
+            .url(apiUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("HTTP-Referer", "https://github.com/1ZAMZAMICH1/igentii")
+            .addHeader("X-Title", "Master Agent")
+            .post(requestBodyJson.toString().toRequestBody(mediaType))
+            .build()
+
         sendRequest(request, callback, MAX_RETRIES, INITIAL_RETRY_DELAY_MS)
     }
 
@@ -146,36 +100,32 @@ class BrainService(private val apiKey: String, private val apiUrl: String, priva
                 if (!response.isSuccessful || responseStr == null) {
                     val code = response.code
                     Log.e(TAG, "API returned error code $code: $responseStr")
+                    
+                    // Don't retry on client errors (4xx) - they won't be fixed by retrying
+                    if (code in 400..499) {
+                        callback.onFailure("API Error code $code: ${getErrorMessage(responseStr)}")
+                        return
+                    }
+                    
+                    // Retry on rate limit (429) or server errors (5xx)
                     if ((code == 429 || code >= 500) && retriesLeft > 0) {
                         Log.w(TAG, "Retrying in ${delayMs}ms. Retries left: ${retriesLeft - 1}")
                         Handler(Looper.getMainLooper()).postDelayed({
                             sendRequest(request, callback, retriesLeft - 1, delayMs * 2)
                         }, delayMs)
-                    } else {
-                        callback.onFailure("API Error code $code")
+                        return
                     }
+                    
+                    callback.onFailure("API Error code $code: ${getErrorMessage(responseStr)}")
                     return
                 }
 
                 try {
-                    // Try to parse according to provider
                     val rootJson = JSONObject(responseStr)
-                    // For local Ollama, expect {"response":"..."}
-                    if (currentProvider == "local") {
-                        val respJson = JSONObject(responseStr)
-                        val answer = respJson.optString("response", "")
-                        val result = JSONObject().apply {
-                            put("action", "speak")
-                            put("text", answer)
-                        }
-                        callback.onSuccess(result)
-                        return
-                    }
-                    // Default Gemini parsing
-                    val candidates = rootJson.getJSONArray("candidates")
-                    val firstCandidate = candidates.getJSONObject(0)
-                    val responseText = firstCandidate.optString("output", null)
-                        ?: firstCandidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                    val choices = rootJson.getJSONArray("choices")
+                    val firstChoice = choices.getJSONObject(0)
+                    val message = firstChoice.getJSONObject("message")
+                    val responseText = message.getString("content")
                     val actionJson = JSONObject(responseText.trim())
                     callback.onSuccess(actionJson)
                 } catch (e: Exception) {
@@ -184,6 +134,19 @@ class BrainService(private val apiKey: String, private val apiUrl: String, priva
                 }
             }
         })
+    }
+
+    private fun getErrorMessage(responseStr: String?): String {
+        return try {
+            if (responseStr != null) {
+                val errorJson = JSONObject(responseStr)
+                errorJson.optString("error", errorJson.optString("message", "Unknown error"))
+            } else {
+                "No response body"
+            }
+        } catch (e: Exception) {
+            "Unknown error"
+        }
     }
 
     fun setProvider(p: String) {

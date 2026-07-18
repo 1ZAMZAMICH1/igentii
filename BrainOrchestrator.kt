@@ -26,13 +26,8 @@ class BrainOrchestrator(
     }
 
     init {
-        // Determine provider based on API URL
-        when {
-            apiUrl.contains("localhost:11434") -> brain.setProvider("local")
-            apiUrl.contains("router.huggingface.co") -> brain.setProvider("huggingface")
-            apiUrl.contains("api.deepseek.com") -> brain.setProvider("deepseek")
-            else -> brain.setProvider("gemini")
-        }
+        // Always use OpenRouter
+        brain.setProvider("openrouter")
     }
 
     fun executeCommand(instruction: String) {
@@ -185,10 +180,4 @@ class BrainOrchestrator(
     private fun speak(text: String) {
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "UtteranceID")
     }
-}</arg_value><arg_key>task_progress</arg_key><arg_value>- [x] Изучить структуру проекта
-- [x] Понять ошибки HF/DeepSeek
-- [x] Добавить поддержку локального inference (Ollama)
-- [x] Обновить MainActivity для выбора локального провайдера
-- [x] Обновить WakeWordService для передачи параметров
-- [x] Обновить BrainOrchestrator для поддержки локального inference
-- [ ] Тестировать работу без API‑ключей</arg_value></tool_call>
+}

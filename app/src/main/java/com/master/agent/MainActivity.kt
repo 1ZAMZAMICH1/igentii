@@ -115,64 +115,33 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(container)
 
-        // Инициализация Спиннера
-        val providers = arrayOf("Google Gemini", "Hugging Face (Llama 3)", "DeepSeek", "Custom / Другой")
+        // Инициализация Спиннера - только OpenRouter
+        val providers = arrayOf("OpenRouter")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
         providerSpinner.adapter = adapter
 
         val sharedPref = getPreferences(Context.MODE_PRIVATE)
 
         // Загружаем сохраненные данные
-        val savedProviderIndex = sharedPref.getInt("PROVIDER_INDEX", 0)
         val savedKey = sharedPref.getString("GEMINI_API_KEY", "")
-        val savedUrl = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com")
-        val savedModel = sharedPref.getString("MODEL_NAME", "gemini-1.5-flash")
+        val savedUrl = sharedPref.getString("API_URL", "https://openrouter.ai/api/v1/chat/completions")
+        val savedModel = sharedPref.getString("MODEL_NAME", "google/gemini-2.5-flash")
 
-        providerSpinner.setSelection(savedProviderIndex)
+        providerSpinner.setSelection(0)
         apiKeyInput.setText(savedKey)
         apiUrlInput.setText(savedUrl)
         modelNameInput.setText(savedModel)
 
-        // Обработка выбора провайдера в Spinner
-        providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                when (position) {
-                    0 -> { // Gemini
-                        apiUrlInput.setText("https://generativelanguage.googleapis.com")
-                        modelNameInput.setText("gemini-1.5-flash")
-                        apiKeyInput.visibility = View.VISIBLE
-                        setCustomFieldsVisible(false)
-                    }
-                    1 -> { // Hugging Face
-                        apiUrlInput.setText("https://router.huggingface.co/v1")
-                        modelNameInput.setText("meta-llama/Meta-Llama-3-8B-Instruct")
-                        apiKeyInput.visibility = View.VISIBLE
-                        setCustomFieldsVisible(false)
-                    }
-                    2 -> { // DeepSeek
-                        apiUrlInput.setText("https://api.deepseek.com/chat/completions")
-                        modelNameInput.setText("deepseek-chat")
-                        apiKeyInput.visibility = View.VISIBLE
-                        setCustomFieldsVisible(false)
-                    }
-                    3 -> { // Custom
-                        setCustomFieldsVisible(true)
-                        apiKeyInput.visibility = View.GONE // API Key не требуется для локального
-                    }
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        // Для OpenRouter показываем поля
+        setCustomFieldsVisible(true)
+        apiKeyInput.visibility = View.VISIBLE
 
         saveButton.setOnClickListener {
-            val position = providerSpinner.selectedItemPosition
             val key = apiKeyInput.text.toString().trim()
             val url = apiUrlInput.text.toString().trim()
             val model = modelNameInput.text.toString().trim()
 
             with(sharedPref.edit()) {
-                putInt("PROVIDER_INDEX", position)
                 putString("GEMINI_API_KEY", key)
                 putString("API_URL", url)
                 putString("MODEL_NAME", model)
@@ -187,13 +156,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         wakeWordButton.setOnClickListener {
-            val position = providerSpinner.selectedItemPosition
             val key = sharedPref.getString("GEMINI_API_KEY", "") ?: ""
-            val url = sharedPref.getString("API_URL", "https://generativelanguage.googleapis.com") ?: "https://generativelanguage.googleapis.com"
-            val model = sharedPref.getString("MODEL_NAME", "gemini-1.5-flash") ?: "gemini-1.5-flash"
+            val url = sharedPref.getString("API_URL", "https://openrouter.ai/api/v1/chat/completions") ?: "https://openrouter.ai/api/v1/chat/completions"
+            val model = sharedPref.getString("MODEL_NAME", "google/gemini-2.5-flash") ?: "google/gemini-2.5-flash"
 
-            if (key.isEmpty() && position != 3) { // API Key требуется для облачных провайдеров
-                Toast.makeText(this, "Пожалуйста, введите API Key!", Toast.LENGTH_LONG).show()
+            if (key.isEmpty()) {
+                Toast.makeText(this, "Пожалуйста, введите API Key OpenRouter!", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
 
